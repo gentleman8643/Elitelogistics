@@ -33,8 +33,8 @@ export default function AdminSetupPage() {
   useEffect(() => {
     async function checkAdmins() {
       const supabase = createBrowserClient();
-      const { data } = await supabase.from('admin_profiles').select('id').limit(1);
-      setAdminExists((data?.length ?? 0) > 0);
+      const { data } = await supabase.rpc('admin_exists');
+      setAdminExists(data === true);
       setChecking(false);
     }
     checkAdmins();
@@ -66,34 +66,47 @@ export default function AdminSetupPage() {
       const supabase = createBrowserClient();
 
       // Check if any admin already exists (double-check on submit)
-      const { data: existing } = await supabase
-        .from('admin_profiles')
-        .select('id')
-        .limit(1);
-      if (existing && existing.length > 0) {
+      const { data: exists } = await supabase.rpc('admin_exists');
+      if (exists === true) {
         toast.error('An admin account already exists. Please log in instead.');
         router.push('/admin/login');
         return;
       }
 
-      const { data, error } = await supabase.auth.signUp({ email, password });
-      if (error) throw error;
-      if (!data.user) throw new Error('Unable to create account.');
+      // The database trigger creates the super_admin profile for this signup
+      // while no admin exists yet (works even if email confirmation is required).
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: { data: { name, setup_first_admin: true } },
+      });
 
-      // Insert the admin profile row — RLS allows this because no super_admin exists yet
-      const { error: profileError } = await supabase
-        .from('admin_profiles')
-        .insert({ id: data.user.id, name, role: 'super_admin' });
+      if (error && !/already registered/i.test(error.message)) throw error;
 
-      if (profileError) {
-        // Profile insert failed — clean up the auth user so they can retry
-        await supabase.auth.signOut();
-        throw new Error('Account created but profile setup failed. Please try again.');
+      if (error || (data.user && data.user.identities?.length === 0)) {
+        // Account already exists from an earlier attempt — sign in and claim the role
+        const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+        if (signInError) {
+          throw new Error('This email is already registered. Use its existing password to finish setup.');
+        }
+        const { error: claimError } = await supabase.rpc('claim_first_admin', { admin_name: name });
+        if (claimError) throw claimError;
+      } else if (!data.user) {
+        throw new Error('Unable to create account.');
       }
 
-      toast.success('Administrator account created successfully! Please log in.');
-      // Sign out the setup session so the user logs in fresh
+      const { data: created } = await supabase.rpc('admin_exists');
       await supabase.auth.signOut();
+
+      if (created !== true) {
+        throw new Error('Account created but admin setup failed. Make sure the latest database migration has been applied.');
+      }
+
+      if (!data.session && !error) {
+        toast.success('Administrator account created! Check your email to confirm it, then log in.');
+      } else {
+        toast.success('Administrator account created successfully! Please log in.');
+      }
       router.push('/admin/login');
     } catch (err: any) {
       toast.error(err.message || 'Unable to create admin account.');
