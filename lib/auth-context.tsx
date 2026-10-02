@@ -10,6 +10,7 @@ interface AuthContextValue {
   user: User | null;
   profile: AdminProfile | null;
   loading: boolean;
+  profileLoading: boolean;
   signOut: () => Promise<void>;
 }
 
@@ -18,6 +19,7 @@ const AuthContext = createContext<AuthContextValue>({
   user: null,
   profile: null,
   loading: true,
+  profileLoading: true,
   signOut: async () => {},
 });
 
@@ -26,6 +28,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<AdminProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [profileLoading, setProfileLoading] = useState(true);
 
   useEffect(() => {
     const supabase = createBrowserClient();
@@ -37,16 +40,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         fetchProfile(data.session.user.id);
       } else {
         setLoading(false);
+        setProfileLoading(false);
       }
     });
 
     async function fetchProfile(userId: string) {
+      setProfileLoading(true);
       const { data } = await supabase
         .from('admin_profiles')
         .select('*')
         .eq('id', userId)
         .maybeSingle();
       setProfile(data as AdminProfile | null);
+      setProfileLoading(false);
       setLoading(false);
     }
 
@@ -61,6 +67,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         })();
       } else {
         setProfile(null);
+        setProfileLoading(false);
         setLoading(false);
       }
     });
@@ -77,7 +84,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ session, user, profile, loading, signOut }}>
+    <AuthContext.Provider value={{ session, user, profile, loading, profileLoading, signOut }}>
       {children}
     </AuthContext.Provider>
   );

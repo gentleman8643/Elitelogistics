@@ -64,17 +64,36 @@ export default function AdminSetupPage() {
     setLoading(true);
     try {
       const supabase = createBrowserClient();
+
+      // Check if any admin already exists (double-check on submit)
+      const { data: existing } = await supabase
+        .from('admin_profiles')
+        .select('id')
+        .limit(1);
+      if (existing && existing.length > 0) {
+        toast.error('An admin account already exists. Please log in instead.');
+        router.push('/admin/login');
+        return;
+      }
+
       const { data, error } = await supabase.auth.signUp({ email, password });
       if (error) throw error;
       if (!data.user) throw new Error('Unable to create account.');
 
+      // Insert the admin profile row — RLS allows this because no super_admin exists yet
       const { error: profileError } = await supabase
         .from('admin_profiles')
         .insert({ id: data.user.id, name, role: 'super_admin' });
 
-      if (profileError) throw profileError;
+      if (profileError) {
+        // Profile insert failed — clean up the auth user so they can retry
+        await supabase.auth.signOut();
+        throw new Error('Account created but profile setup failed. Please try again.');
+      }
 
-      toast.success('Administrator account created successfully!');
+      toast.success('Administrator account created successfully! Please log in.');
+      // Sign out the setup session so the user logs in fresh
+      await supabase.auth.signOut();
       router.push('/admin/login');
     } catch (err: any) {
       toast.error(err.message || 'Unable to create admin account.');

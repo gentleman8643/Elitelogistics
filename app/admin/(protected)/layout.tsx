@@ -24,7 +24,7 @@ const NAV_ITEMS = [
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
-  const { session, profile, loading, signOut } = useAuth();
+  const { session, profile, loading, profileLoading, signOut } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -36,19 +36,12 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         router.replace('/admin/login');
         return;
       }
-      if (session && profile === null) {
-        // Profile might not be loaded yet; give it a moment
-        const timer = setTimeout(() => {
-          if (profile === null) {
-            // Still no profile - sign out
-            signOut();
-            router.replace('/admin/login');
-          }
-        }, 2000);
-        return () => clearTimeout(timer);
+      if (session && !profileLoading && profile === null) {
+        signOut();
+        router.replace('/admin/login');
       }
     }
-  }, [session, profile, loading, router, signOut]);
+  }, [session, profile, loading, profileLoading, router, signOut]);
 
   useEffect(() => {
     async function checkAdmins() {
@@ -59,7 +52,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     checkAdmins();
   }, []);
 
-  if (loading) {
+  if (loading || (session && profileLoading)) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50">
         <div className="text-center">

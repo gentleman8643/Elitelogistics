@@ -53,7 +53,8 @@ export default function AdminLoginPage() {
       }
 
       toast.success('Welcome back!');
-      router.push('/admin/dashboard');
+      // Use replace so back button doesn't return to login
+      router.replace('/admin/dashboard');
     } catch (err: any) {
       toast.error(err.message || 'Unable to sign in. Please check your credentials.');
     } finally {
