@@ -10,6 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/lib/auth-context';
 import { createBrowserClient } from '@/lib/supabase/client';
+import { createClient } from '@supabase/supabase-js';
 import type { SiteSettings, AdminProfile } from '@/lib/types';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -288,9 +289,18 @@ function AddAdminDialog({ onClose, onAdded }: { onClose: () => void; onAdded: ()
     setLoading(true);
     try {
       const supabase = createBrowserClient();
-      const { data, error } = await supabase.auth.signUp({ email, password });
+      // Sign up the new admin with an isolated client so the current super admin's
+      // session isn't replaced (the profile insert below must run as the super admin).
+      const signupClient = createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
+        { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } }
+      );
+      const { data, error } = await signupClient.auth.signUp({ email, password });
       if (error) throw error;
-      if (!data.user) throw new Error('Unable to create account.');
+      if (!data.user || data.user.identities?.length === 0) {
+        throw new Error('Unable to create account. This email may already be registered.');
+      }
 
       const { error: profileError } = await supabase.from('admin_profiles').insert({
         id: data.user.id,
