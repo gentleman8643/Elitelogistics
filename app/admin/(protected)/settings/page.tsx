@@ -288,16 +288,26 @@ function AddAdminDialog({ onClose, onAdded }: { onClose: () => void; onAdded: ()
     setLoading(true);
     try {
       const supabase = createBrowserClient();
-      const { data, error } = await supabase.auth.signUp({ email, password });
-      if (error) throw error;
-      if (!data.user) throw new Error('Unable to create account.');
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) {
+        throw new Error('Your session has expired. Please log in again.');
+      }
 
-      const { error: profileError } = await supabase.from('admin_profiles').insert({
-        id: data.user.id,
-        name,
-        role,
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const response = await fetch(`${supabaseUrl}/functions/v1/create-admin`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ email, password, name: name.trim(), role }),
       });
-      if (profileError) throw profileError;
+
+      if (!response.ok) {
+        const body = await response.json();
+        throw new Error(body.error || 'Failed to create admin account.');
+      }
 
       toast.success('Admin account created successfully.');
       onAdded();

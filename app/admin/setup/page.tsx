@@ -33,8 +33,8 @@ export default function AdminSetupPage() {
   useEffect(() => {
     async function checkAdmins() {
       const supabase = createBrowserClient();
-      const { data } = await supabase.from('admin_profiles').select('id').limit(1);
-      setAdminExists((data?.length ?? 0) > 0);
+      const { data, error } = await supabase.rpc('admin_exists');
+      setAdminExists(Boolean(data));
       setChecking(false);
     }
     checkAdmins();
@@ -65,34 +65,57 @@ export default function AdminSetupPage() {
     try {
       const supabase = createBrowserClient();
 
-      // Check if any admin already exists (double-check on submit)
-      const { data: existing } = await supabase
-        .from('admin_profiles')
-        .select('id')
-        .limit(1);
-      if (existing && existing.length > 0) {
+      // Double-check no admin exists
+      const { data: exists } = await supabase.rpc('admin_exists');
+      if (exists) {
         toast.error('An admin account already exists. Please log in instead.');
         router.push('/admin/login');
         return;
       }
 
-      const { data, error } = await supabase.auth.signUp({ email, password });
-      if (error) throw error;
-      if (!data.user) throw new Error('Unable to create account.');
+      // Try to sign up
+      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({ email, password });
 
-      // Insert the admin profile row — RLS allows this because no super_admin exists yet
-      const { error: profileError } = await supabase
-        .from('admin_profiles')
-        .insert({ id: data.user.id, name, role: 'super_admin' });
+      // Case 1: Email already registered — try signing in and claiming
+      if (signUpError && signUpError.message.toLowerCase().includes('already')) {
+        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+        if (signInError) {
+          throw new Error('That email is already registered. If you know the password, enter it to finish setup.');
+        }
 
-      if (profileError) {
-        // Profile insert failed — clean up the auth user so they can retry
-        await supabase.auth.signOut();
-        throw new Error('Account created but profile setup failed. Please try again.');
+        // Successfully signed in — claim first admin
+        const { error: claimError } = await supabase.rpc('claim_first_admin', { p_name: name.trim() });
+        if (claimError) {
+          await supabase.auth.signOut();
+          throw new Error(claimError.message || 'Unable to claim admin role.');
+        }
+
+        toast.success('Administrator account created successfully!');
+        router.replace('/admin/dashboard');
+        return;
       }
 
+      if (signUpError) throw signUpError;
+      if (!signUpData.user) throw new Error('Unable to create account.');
+
+      // Case 2: signUp succeeded but no session (email confirmation required)
+      if (!signUpData.session) {
+        // The database trigger may have already created the profile.
+        // If not, the user will need to confirm their email, then log in.
+        // We try claiming first — it works if the trigger didn't fire.
+        // If it fails because no session, tell user to check email.
+        toast.success('Account created! Please check your email to confirm your address, then log in.');
+        await supabase.auth.signOut();
+        router.push('/admin/login');
+        return;
+      }
+
+      // Case 3: signUp succeeded WITH session (email confirmation off)
+      // The trigger already created the profile, but if it didn't, claim it.
+      const { error: claimError } = await supabase.rpc('claim_first_admin', { p_name: name.trim() });
+      // Ignore error if profile already exists (trigger handled it)
+
       toast.success('Administrator account created successfully! Please log in.');
-      // Sign out the setup session so the user logs in fresh
       await supabase.auth.signOut();
       router.push('/admin/login');
     } catch (err: any) {

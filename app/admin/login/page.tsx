@@ -22,8 +22,8 @@ export default function AdminLoginPage() {
   useEffect(() => {
     async function checkAdmins() {
       const supabase = createBrowserClient();
-      const { data } = await supabase.from('admin_profiles').select('id').limit(1);
-      setHasAdmins((data?.length ?? 0) > 0);
+      const { data } = await supabase.rpc('admin_exists');
+      setHasAdmins(Boolean(data));
     }
     checkAdmins();
   }, []);
